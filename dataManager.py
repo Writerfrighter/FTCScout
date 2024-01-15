@@ -3,13 +3,14 @@ import pandas as pd
 from numpy import nan
 import os
 import glob
-
+import json
 # Local Imports
 import params
 
-def completeData(eventCode):
+
+def completeData(file):
     """Completes scouting data using TBA data for the event"""
-    df = pd.read_excel("{}\{}.xlsx".format(params.download_folder, eventCode))
+    df = pd.read_excel("{}.xlsx".format(file))
     # eventMatches = TBA.fetchEventMatches(eventCode)
 
     for k, entry in enumerate(list(df.values)):
@@ -47,7 +48,7 @@ def fixInvalidTeamNumber(givenTeamNumber, matchKey):
     matches = []
     for i in range(len(teams)):
         matches.append(0)
-        teams[i] = teams[i][3::]
+        teams[i] = str(teams[i])  # [3::]
         for j in range(len(teams[i])):
             try:
                 if teams[i][j] == givenTeamNumber[j]:
@@ -128,12 +129,16 @@ def get_team_data(team_number: int, data_file=None):
                     result[catagory][item["header"]] == "None"
                     # Optional Nonetype replacement
             elif item["operation"] == "MAX_VALUE":
-                pass
+                lst = df[item["field"]].tolist() #.remove(item["default"])
+                for value in item["values"]:
+                    if value in lst:
+                        result[catagory][item["header"]] = value
+                        break
             elif item["operation"] == "STANDARD_DEV":
                 pass
             elif item["operation"] == "EPA":
                 result[catagory][item["header"]] = calculate_epa(
-                    team_number, fields=item["fields"]
+                    team_number, data_file=data_file, fields=item["fields"]
                 )
             else:
                 print("Unsupported opperation")
@@ -148,7 +153,9 @@ def calculate_epa(team_number: int, data_file=None, fields="all"):
         df = pd.read_excel(file)
     else:
         try:
-            df = pd.read_excel(data_file, true_values=["Yes", "True", "true", True], false_values=["No", "False", "false", False])
+            df = pd.read_excel(
+                data_file, true_values=["Yes", True], false_values=["No", False]
+            )
         except:
             raise FileNotFoundError(
                 "File at path {} not found, please use a valid local or global path".format(
@@ -161,34 +168,46 @@ def calculate_epa(team_number: int, data_file=None, fields="all"):
         fields = list(params.point_values.keys())
     EPA = 0
     for field in fields:
-        print(field)
+        # print(field)
         data_list = df[field].tolist()
-        print(data_list[2])
-        print(df.loc[::, field])
+        # print(data_list[2])
+        # print(df.loc[::, field])
         field_type = type(data_list[0])
-        
-        if field_type == int or field_type == float:
+        if type(params.point_values[field]) == dict:
+            for i in range(len(data_list)):
+                value = params.point_values[field].get(data_list[i])
+                data_list[i] = value if value != None else 0
+            EPA += mean(data_list)
+        elif field_type == int or field_type == float:
             EPA += mean(data_list) * params.point_values[field]
-        elif field_type == str:
+        elif field_type == str:  # Potentially Redundant
             for i in range(len(data_list)):
                 value = params.point_values[field].get(data_list[i])
                 data_list[i] = value if value != None else 0
             EPA += mean(data_list)
         elif field_type == bool:
-            if type(params.point_values[field]) == dict:
-                for i in range(len(data_list)):
-                    data_list[i] = params.point_values[field][data_list[i]]
-            else:
-                for i in range(len(data_list)):
-                    data_list[i] = params.point_values[field] if data_list[i] else 0
+            for i in range(len(data_list)):
+                data_list[i] = params.point_values[field] if data_list[i] else 0
             EPA += mean(data_list)
         else:
-            print("Unsupported field type:", field_type)
-        print(data_list)
+            print("WARNING: Potentially Unsupported field type:", field_type)
+            for i in range(len(data_list)):
+                value = params.point_values[field].get(data_list[i])
+                data_list[i] = value if value != None else 0
+            EPA += mean(data_list)
+        # print(data_list)
     return EPA
 
 
 def mean(list):
+    # print(list)
+    for i in range(len(list)):
+        if list[i] == None: list[i] = 0
     return sum(list) / len(list)
 
-print(calculate_epa(24621, "FTC Game Scouting Turing #2 (Responses).xlsx"))
+lst = {}
+for team in params.teams:
+    print(team)
+    data = get_team_data(team, "FTC Game Scouting - Interleague (Responses).xlsx")
+    lst[team] = (data["Score"]["EPA"])
+print(json.dumps(dict(sorted(lst.items(), key = lambda lst: lst[1], reverse=True)), indent=4))
